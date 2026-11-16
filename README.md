@@ -107,14 +107,29 @@ php artisan key:generate
 php artisan migrate:fresh --seed
 ```
 
-### 3. Setting Up Pixelforge Secrets
+### 3. Automated CI/CD Deployment Script
+An automated deployment script is provided to set up, build, migrate, and cache the application for CI/CD pipelines and production deployments:
+```bash
+# Run automated deployment
+./deploy.sh
+```
+This script handles:
+- Environment initialization (`.env` creation and app key generation if needed)
+- SQLite database file initialization
+- Composer dependency installation (`--prefer-dist --optimize-autoloader`)
+- NPM dependencies installation and production asset compilation (`npm run build`)
+- Database migrations execution (`php artisan migrate --force`)
+- Configuration, route, and view caching for optimal performance
+- Storage symlink creation
+
+### 4. Setting Up Pixelforge Secrets
 In your `.env` file, configure:
 ```env
 PIXEL_FORGE_API_KEY=your_pixelforge_api_key
 PIXEL_FORGE_WEBHOOK_SECRET=your_webhook_signing_secret
 ```
 
-### 4. Running Locally with Webhook Tunnel
+### 5. Running Locally with Webhook Tunnel
 To receive webhooks locally, expose port 8000 using Ngrok, Cloudflare Tunnel, or Expose:
 ```bash
 # Start Laravel development server
