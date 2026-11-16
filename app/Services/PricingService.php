@@ -28,8 +28,12 @@ class PricingService
     public function getOutputTokens(string $quality, string $size): int
     {
         $data = $this->getPricingData();
-        $tokenSpecs = $data['token_specs']['output'] ?? [];
 
+        if (isset($data['tokens']['output'][$quality][$size])) {
+            return (int) $data['tokens']['output'][$quality][$size];
+        }
+
+        $tokenSpecs = $data['token_specs']['output'] ?? [];
         foreach ($tokenSpecs as $spec) {
             if (($spec['quality'] ?? '') === $quality && ($spec['size'] ?? '') === $size) {
                 return (int) ($spec['tokens'] ?? 0);
@@ -42,8 +46,16 @@ class PricingService
     public function getReasoningRange(string $quality): array
     {
         $data = $this->getPricingData();
-        $tokenSpecs = $data['token_specs']['reasoning'] ?? [];
 
+        if (isset($data['tokens']['reasoning'][$quality])) {
+            $spec = $data['tokens']['reasoning'][$quality];
+            return [
+                'min' => (int) ($spec['min'] ?? 0),
+                'max' => (int) ($spec['max'] ?? 0),
+            ];
+        }
+
+        $tokenSpecs = $data['token_specs']['reasoning'] ?? [];
         foreach ($tokenSpecs as $spec) {
             if (($spec['quality'] ?? '') === $quality) {
                 return [
@@ -69,33 +81,26 @@ class PricingService
         $textTokens = (int) ceil(mb_strlen($prompt) / 4);
         $imageTokens = $referenceImageCount * 765;
 
+        $textRate = $rates['input_text_tokens'] ?? $rates['input_text'] ?? '5.00';
+        $imageRate = $rates['input_image_tokens'] ?? $rates['input_image'] ?? '10.00';
+        $outputRate = $rates['output_tokens'] ?? $rates['output'] ?? '40.00';
+        $reasoningRate = $rates['reasoning_tokens'] ?? $rates['reasoning'] ?? '12.50';
+
         $minCost = Money::zero();
-        if (isset($rates['input_text'])) {
-            $minCost = $minCost->add(Money::fromTokensAndRate($textTokens, $rates['input_text']));
+        $minCost = $minCost->add(Money::fromTokensAndRate($textTokens, $textRate));
+        if ($imageTokens > 0) {
+            $minCost = $minCost->add(Money::fromTokensAndRate($imageTokens, $imageRate));
         }
-        if (isset($rates['input_image']) && $imageTokens > 0) {
-            $minCost = $minCost->add(Money::fromTokensAndRate($imageTokens, $rates['input_image']));
-        }
-        if (isset($rates['output'])) {
-            $minCost = $minCost->add(Money::fromTokensAndRate($outputTokens, $rates['output']));
-        }
-        if (isset($rates['reasoning'])) {
-            $minCost = $minCost->add(Money::fromTokensAndRate($reasoningRange['min'], $rates['reasoning']));
-        }
+        $minCost = $minCost->add(Money::fromTokensAndRate($outputTokens, $outputRate));
+        $minCost = $minCost->add(Money::fromTokensAndRate($reasoningRange['min'], $reasoningRate));
 
         $maxCost = Money::zero();
-        if (isset($rates['input_text'])) {
-            $maxCost = $maxCost->add(Money::fromTokensAndRate($textTokens, $rates['input_text']));
+        $maxCost = $maxCost->add(Money::fromTokensAndRate($textTokens, $textRate));
+        if ($imageTokens > 0) {
+            $maxCost = $maxCost->add(Money::fromTokensAndRate($imageTokens, $imageRate));
         }
-        if (isset($rates['input_image']) && $imageTokens > 0) {
-            $maxCost = $maxCost->add(Money::fromTokensAndRate($imageTokens, $rates['input_image']));
-        }
-        if (isset($rates['output'])) {
-            $maxCost = $maxCost->add(Money::fromTokensAndRate($outputTokens, $rates['output']));
-        }
-        if (isset($rates['reasoning'])) {
-            $maxCost = $maxCost->add(Money::fromTokensAndRate($reasoningRange['max'], $rates['reasoning']));
-        }
+        $maxCost = $maxCost->add(Money::fromTokensAndRate($outputTokens, $outputRate));
+        $maxCost = $maxCost->add(Money::fromTokensAndRate($reasoningRange['max'], $reasoningRate));
 
         $headlineNano = intdiv($minCost->nanoDollars + $maxCost->nanoDollars, 2);
         $headline = new Money($headlineNano);
@@ -116,10 +121,32 @@ class PricingService
     {
         $cost = Money::zero();
 
-        foreach (['input_text', 'input_image', 'output', 'reasoning'] as $key) {
-            $tokens = $usage[$key] ?? 0;
-            if ($tokens > 0 && isset($rates[$key])) {
-                $cost = $cost->add(Money::fromTokensAndRate((int) $tokens, $rates[$key]));
+        $tokenKeys = [
+            'input_text' => ['input_text_tokens', 'input_text'],
+            'input_image' => ['input_image_tokens', 'input_image'],
+            'output' => ['output_tokens', 'output'],
+            'reasoning' => ['reasoning_tokens', 'reasoning'],
+        ];
+
+        foreach ($tokenKeys as $type => $aliases) {
+            $tokens = 0;
+            foreach ($aliases as $k) {
+                if (isset($usage[$k])) {
+                    $tokens = (int) $usage[$k];
+                    break;
+                }
+            }
+
+            $rate = null;
+            foreach ($aliases as $k) {
+                if (isset($rates[$k])) {
+                    $rate = $rates[$k];
+                    break;
+                }
+            }
+
+            if ($tokens > 0 && $rate !== null) {
+                $cost = $cost->add(Money::fromTokensAndRate($tokens, $rate));
             }
         }
 

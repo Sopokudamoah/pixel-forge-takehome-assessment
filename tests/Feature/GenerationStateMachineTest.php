@@ -114,3 +114,49 @@ test('it calculates cost on succeeded using snapshot rates from the generation r
 
     expect(UserLedger::where('generation_id', $genId)->first()->amount_nano)->toBe(14_450_000);
 });
+
+test('it calculates cost with real-world pixelforge token keys', function () {
+    $pricing = app(PricingService::class);
+    $balance = app(BalanceService::class);
+    $machine = new GenerationStateMachine($pricing, $balance);
+
+    $user = User::factory()->create();
+    UserBalance::create([
+        'user_id' => $user->id,
+        'balance_nano' => 10_000_000_000,
+    ]);
+
+    $genId = (string) Str::uuid();
+
+    $gen = Generation::create([
+        'id' => $genId,
+        'user_id' => $user->id,
+        'prompt' => 'API keys test',
+        'size' => '1024x1024',
+        'quality' => 'low',
+        'status' => 'queued',
+        'rates' => [
+            'input_text_tokens' => '5.00',
+            'output_tokens' => '40.00',
+            'reasoning_tokens' => '12.50',
+        ],
+        'idempotency_key' => $genId,
+    ]);
+
+    $payload = [
+        'usage' => [
+            'input_text_tokens' => 6,
+            'input_image_tokens' => 0,
+            'output_tokens' => 280,
+            'reasoning_tokens' => 113,
+        ],
+        'image_url' => 'https://pixelforge.promptedit.dev/images/sample.png',
+    ];
+
+    $machine->transition($gen, 'succeeded', $payload);
+
+    $gen->refresh();
+    expect($gen->status)->toBe('succeeded')
+        ->and($gen->provider_cost_nano)->toBe(12_642_500)
+        ->and($gen->user_charge_nano)->toBe(15_803_125);
+});

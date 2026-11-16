@@ -71,20 +71,23 @@ class GenerationStateMachine
             $generation->usage = $payload['usage'];
         }
 
-        if (isset($payload['image']['url'])) {
-            $generation->image_url = $payload['image']['url'];
-        } elseif (isset($payload['image_url'])) {
+        if (isset($payload['image_url'])) {
             $generation->image_url = $payload['image_url'];
+        } elseif (isset($payload['image']['url'])) {
+            $generation->image_url = $payload['image']['url'];
         }
 
-        if (isset($payload['image']['expires_at'])) {
-            $generation->image_url_expires_at = $payload['image']['expires_at'];
-        } elseif (isset($payload['image_url_expires_at'])) {
+        if (isset($payload['image_url_expires_at'])) {
             $generation->image_url_expires_at = $payload['image_url_expires_at'];
+        } elseif (isset($payload['image']['expires_at'])) {
+            $generation->image_url_expires_at = $payload['image']['expires_at'];
         }
+
+        $rates = !empty($generation->rates) ? $generation->rates : ($payload['rates'] ?? $this->pricingService->getRatesSnapshot());
+        $generation->rates = $rates;
 
         $usage = $payload['usage'] ?? [];
-        $providerCost = $this->pricingService->calculateActualCost($usage, $generation->rates);
+        $providerCost = $this->pricingService->calculateActualCost($usage, $rates);
         $userCharge = $providerCost->withMarkup();
 
         $generation->provider_cost_nano = $providerCost->nanoDollars;

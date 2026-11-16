@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 
 class ReconcileGenerations extends Command
 {
-    protected $signature = 'pixelforge:reconcile-generations';
+    protected $signature = 'pixelforge:reconcile-generations {--all : Reconcile all non-terminal generations regardless of updated_at}';
     protected $description = 'Poll Pixelforge API for stuck generations';
 
     public function __construct(
@@ -21,28 +21,38 @@ class ReconcileGenerations extends Command
 
     public function handle(): int
     {
-        $stuck = Generation::whereIn('status', ['queued', 'processing'])
-            ->where('updated_at', '<', now()->subMinutes(2))
-            ->get();
+        $query = Generation::whereIn('status', ['queued', 'processing']);
+        if (!$this->option('all')) {
+            $query->where('updated_at', '<', now()->subSeconds(30));
+        }
 
-        $this->info("Found {$stuck->count()} stuck generations.");
+        $stuck = $query->get();
+
+        $this->info("Found {$stuck->count()} in-flight generations to reconcile.");
 
         foreach ($stuck as $generation) {
             if (empty($generation->provider_id)) {
-                continue;
+                try {
+                    (new \App\Jobs\CreateGenerationJob($generation))->handle($this->client, $this->stateMachine);
+                    $generation->refresh();
+                } catch (\Throwable $e) {
+                    $this->warn("Could not dispatch generation {$generation->id}: {$e->getMessage()}");
+                }
             }
 
-            try {
-                $data = $this->client->getGeneration($generation->provider_id);
-                $statusMap = ['queued' => 'queued', 'processing' => 'processing', 'succeeded' => 'succeeded', 'failed' => 'failed'];
-                $newStatus = $statusMap[$data['status'] ?? ''] ?? null;
+            if (!empty($generation->provider_id) && !$generation->isTerminal()) {
+                try {
+                    $data = $this->client->getGeneration($generation->provider_id);
+                    $statusMap = ['queued' => 'queued', 'processing' => 'processing', 'succeeded' => 'succeeded', 'failed' => 'failed'];
+                    $newStatus = $statusMap[$data['status'] ?? ''] ?? null;
 
-                if ($newStatus && $newStatus !== $generation->status) {
-                    $this->stateMachine->transition($generation, $newStatus, $data);
-                    $this->info("Updated {$generation->id} to {$newStatus}.");
+                    if ($newStatus && $newStatus !== $generation->status) {
+                        $this->stateMachine->transition($generation, $newStatus, $data);
+                        $this->info("Updated {$generation->id} to {$newStatus}.");
+                    }
+                } catch (\Exception $e) {
+                    $this->error("Failed {$generation->id}: {$e->getMessage()}");
                 }
-            } catch (\Exception $e) {
-                $this->error("Failed {$generation->id}: {$e->getMessage()}");
             }
         }
 

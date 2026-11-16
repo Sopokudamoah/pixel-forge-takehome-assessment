@@ -49,7 +49,13 @@ class WebhookController extends Controller
             return response()->json(['status' => 'ok']);
         }
 
-        $generationId = $payload['data']['metadata']['generation_id'] ?? $payload['data']['id'] ?? null;
+        $eventData = $payload['data'] ?? $payload;
+        $generationId = $eventData['metadata']['generation_id']
+            ?? $payload['metadata']['generation_id']
+            ?? $eventData['id']
+            ?? $payload['id']
+            ?? null;
+
         if (!$generationId) {
             Log::warning("Webhook received without generation_id: {$eventId}");
             return response()->json(['status' => 'ok']);
@@ -60,12 +66,16 @@ class WebhookController extends Controller
             $generation = Generation::where('provider_id', $generationId)->first();
         }
 
+        if (!$generation && isset($eventData['id'])) {
+            $generation = Generation::where('provider_id', $eventData['id'])->first();
+        }
+
         if (!$generation) {
             Log::warning("Webhook for unknown generation: {$generationId}");
             return response()->json(['status' => 'ok']);
         }
 
-        DB::transaction(function () use ($generation, $eventType, $eventId, $payload) {
+        DB::transaction(function () use ($generation, $eventType, $eventId, $payload, $eventData) {
             if (WebhookEvent::where('event_id', $eventId)->exists()) {
                 return;
             }
@@ -86,7 +96,7 @@ class WebhookController extends Controller
 
             $newStatus = $statusMap[$eventType] ?? null;
             if ($newStatus) {
-                $this->stateMachine->transition($generation, $newStatus, $payload['data'] ?? []);
+                $this->stateMachine->transition($generation, $newStatus, $eventData);
             }
         });
 

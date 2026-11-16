@@ -45,12 +45,14 @@ class CreateGenerationJob implements ShouldQueue
                 $this->generation->save();
             }
         } catch (PixelforgeApiException $e) {
+            $attempts = method_exists($this, 'attempts') ? $this->attempts() : 1;
+
             if ($e->isTerminal()) {
                 $stateMachine->transition($this->generation, 'failed', [
                     'error_type' => $e->errorType,
                     'error_message' => $e->userFriendlyMessage(),
                 ]);
-            } elseif ($e->isRetryable() && $this->attempts() < $this->tries) {
+            } elseif ($e->isRetryable() && $attempts < $this->tries) {
                 throw $e;
             } elseif ($e->isRetryable()) {
                 $stateMachine->transition($this->generation, 'failed', [

@@ -19,9 +19,40 @@ class GenerationController extends Controller
     ) {
     }
 
-    public function index(Request $request)
+    public function index(Request $request, \App\Http\Client\PixelforgeClient $client, \App\Actions\GenerationStateMachine $stateMachine)
     {
         $user = $request->user();
+
+        // Self-healing / immediate reconciliation for active generations
+        $activeGenerations = Generation::where('user_id', $user->id)
+            ->whereIn('status', ['queued', 'processing'])
+            ->get();
+
+        foreach ($activeGenerations as $generation) {
+            // If queued and provider_id is missing, execute creation job to ensure it was submitted
+            if (empty($generation->provider_id)) {
+                try {
+                    (new CreateGenerationJob($generation))->handle($client, $stateMachine);
+                    $generation->refresh();
+                } catch (\Throwable $e) {
+                    // Handled within CreateGenerationJob
+                }
+            }
+
+            // If provider_id exists and not terminal, poll Pixelforge for latest status
+            if (!empty($generation->provider_id) && !$generation->isTerminal()) {
+                try {
+                    $data = $client->getGeneration($generation->provider_id);
+                    $status = $data['status'] ?? null;
+                    if ($status && in_array($status, ['processing', 'succeeded', 'failed']) && $status !== $generation->status) {
+                        $stateMachine->transition($generation, $status, $data);
+                    }
+                } catch (\Throwable $e) {
+                    // Continue to next generation
+                }
+            }
+        }
+
         $generations = Generation::where('user_id', $user->id)
             ->orderByDesc('created_at')
             ->paginate(20);
