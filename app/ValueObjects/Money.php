@@ -114,6 +114,11 @@ class Money
      */
     public function formatForDisplay(): string
     {
+        return $this->formatDisplay();
+    }
+
+    public function formatDisplay(): string
+    {
         if ($this->nanoDollars === 0) {
             return '$0.000000000';
         }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\CreateGenerationJob;
+use App\Jobs\SendSlackNotificationJob;
 use App\Http\Requests\GenerateRequest;
 use App\Models\Generation;
 use App\Services\BalanceService;
@@ -110,6 +111,7 @@ class GenerationController extends Controller
         $generation->save();
 
         CreateGenerationJob::dispatch($generation);
+        SendSlackNotificationJob::dispatch($generation, 'started');
 
         return redirect()->route('history')->with('success', 'Generation queued successfully.');
     }
@@ -138,6 +140,7 @@ class GenerationController extends Controller
         $newGeneration->save();
 
         CreateGenerationJob::dispatch($newGeneration);
+        SendSlackNotificationJob::dispatch($newGeneration, 'started');
 
         return redirect()->route('history')->with('success', 'Generation retry queued.');
     }

@@ -109,6 +109,17 @@ Pixel Forge is an image generation platform integrating with the Pixelforge prov
 
 ---
 
+### Pillar 7: Real-Time Slack Notification Engine
+*Files: `app/Services/SlackNotificationService.php`, `app/Jobs/SendSlackNotificationJob.php`*
+
+- **Problem**: Stakeholders require immediate operational visibility whenever an image is generated, succeeds, or fails, without coupling external HTTP latency to the web request cycle.
+- **Solution**:
+  - **Asynchronous Event-Driven Pipeline**: When a generation is queued (`GenerationController`), completed, or failed (`GenerationStateMachine`), the system queues `SendSlackNotificationJob` on the database queue.
+  - **Rich Block Kit Formatting**: Generates clean Slack payloads containing the user's name/email, prompt excerpt, resolution/quality options, exact financial breakdown (provider cost and +25% user charge), and image preview links.
+  - **Resilient Fault Handling**: If `SLACK_WEBHOOK_URL` is unconfigured, or if Slack experiences transient downtime, notifications fail gracefully without disrupting user workflows or state transactions.
+
+---
+
 ## 3. Database Schema Overview
 
 ```

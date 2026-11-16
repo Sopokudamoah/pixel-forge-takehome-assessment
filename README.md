@@ -177,14 +177,24 @@ This script handles:
 - Configuration, route, and view caching for optimal performance
 - Storage symlink creation
 
-### 4. Setting Up Pixelforge Secrets
+### 4. Setting Up Pixelforge & Slack Secrets
 In your `.env` file, configure:
 ```env
 PIXEL_FORGE_API_KEY=your_pixelforge_api_key
 PIXEL_FORGE_WEBHOOK_SECRET=your_webhook_signing_secret
+
+# Optional: Slack Incoming Webhook for real-time generation notifications
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 ```
 
-### 5. Running Locally with Webhook Tunnel
+### 5. Real-Time Slack Notifications
+When `SLACK_WEBHOOK_URL` is set, the application automatically dispatches rich Slack notifications for each generation event:
+- **Generation Initiated**: User, settings (size/quality/ref images), prompt excerpt, and queued status.
+- **Generation Succeeded**: Exact provider cost, user charge (+25% markup), prompt, and live link/preview to the generated image.
+- **Generation Failed**: Error classification, human-readable reason, and $0.00 zero-charge confirmation.
+Notifications are dispatched asynchronously via queued background jobs (`SendSlackNotificationJob`) to ensure zero latency on web requests.
+
+### 6. Running Locally with Webhook Tunnel
 To receive webhooks locally, expose port 8000 using Ngrok, Cloudflare Tunnel, or Expose:
 ```bash
 # Start Laravel development server

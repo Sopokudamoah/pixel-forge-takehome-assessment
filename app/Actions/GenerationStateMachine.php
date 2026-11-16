@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Jobs\SendSlackNotificationJob;
 use App\Models\Generation;
 use App\Services\BalanceService;
 use App\Services\PricingService;
@@ -57,6 +58,13 @@ class GenerationStateMachine
             }
 
             $lockedGeneration->save();
+
+            if ($newStatus === 'succeeded') {
+                SendSlackNotificationJob::dispatch($lockedGeneration, 'completed');
+            } elseif ($newStatus === 'failed') {
+                SendSlackNotificationJob::dispatch($lockedGeneration, 'failed');
+            }
+
             return true;
         });
     }
