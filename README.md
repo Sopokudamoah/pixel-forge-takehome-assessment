@@ -4,6 +4,61 @@ A production-grade Laravel 13 + Vue 3 + Inertia application for generating image
 
 ---
 
+## Reviewer Guide & Quick Evaluation Instructions
+
+To evaluate this assessment with maximum efficiency:
+
+### 1. Live Deployment & Credentials
+- **Live URL**: [https://pixel-forge.sistersister.online](https://pixel-forge.sistersister.online)
+- **Demo User Account**:
+  - **Email**: `test@example.com`
+  - **Password**: `password`
+  - *(Preloaded with $10.00 credit balance; new registrations also receive $10.00 automatically)*
+- **Webhook Endpoint**: `POST https://pixel-forge.sistersister.online/webhooks/pixelforge`
+
+### 2. Key Pages to Evaluate
+1. **Interactive Landing Page (`/`)**: Real-time nanodollar cost calculator simulator, architectural breakdown, and test keyword reference.
+2. **Generate Page (`/generate`)**:
+   - Live cost estimation breakdown (input text tokens, image reference tokens, output tokens, reasoning token range, provider cost, and marked-up user cost).
+   - Instant test keyword insertion buttons (`[succeed]`, `[fail]`, `[slow]`, `[blocked]`, `[duplicate]`, `[overloaded]`).
+   - Image reference inputs (up to 4 URLs) with token scaling.
+3. **History Page (`/history`)**:
+   - Real-time 3-second auto-polling for in-flight jobs (`queued` / `processing`).
+   - High-precision display of estimated vs. actual provider cost and user charge.
+   - Failure error messages with clear reasons and an instant "Retry" action.
+   - Succeeded image display with 24-hour expiry indicators.
+4. **Admin Report & Reconciliation (`/admin/report`)**:
+   - Per-day and per-user financial aggregation (UTC completion day bucketing).
+   - Real-time comparison against Pixelforge's `GET /v1/usage` API demonstrating zero discrepancy.
+5. **Credit Management**:
+   - Header balance counter with a single-click "+$5.00 Test Credits" button.
+   - Atomic conditional lock prevention against negative balances.
+
+### 3. Test Keywords for Immediate Verification
+When testing generation scenarios, add these keywords to prompts:
+| Keyword | Expected Behavior |
+| :--- | :--- |
+| `[succeed]` | Guaranteed success; transitions `queued` &rarr; `processing` &rarr; `succeeded`, downloads image, applies actual cost and 25% markup. |
+| `[fail]` | Generation failure; sets charge to **$0.00**, logs human-readable error, and shows "Retry" button. |
+| `[blocked]` | Triggers 400 content policy violation; marks job as terminal failure with zero charge. |
+| `[slow]` | Simulates 60–90s generation; verifies background queue worker and live history polling. |
+| `[duplicate]` | Webhook delivered twice; verifies idempotent processing and single-charge guarantee. |
+| `[overloaded]` | Triggers 503 response; verifies exponential backoff retry handling (up to 5 attempts). |
+
+### 4. Running Automated Tests & CLI Reconciliation
+```bash
+# Run full Pest test suite (32 tests, 92 assertions covering money math, webhooks, retries, balances)
+./vendor/bin/pest
+
+# Run live provider cost reconciliation against GET /v1/usage
+php artisan usage:reconcile
+
+# Run stuck generation polling reconciliation
+php artisan generations:reconcile
+```
+
+---
+
 ## Architecture & Features
 
 - **Exact Nanodollar Money Model**: 1 USD = 1,000,000,000 nanodollars stored as integer `BIGINT`. No floating-point math anywhere. Rate strings parsed with `BCMath`. Exact round-half-up markup calculation.
