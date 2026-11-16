@@ -1,5 +1,7 @@
 <script setup>
+import { ref, computed, onMounted } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
+import axios from 'axios';
 
 defineProps({
     canLogin: {
@@ -18,369 +20,690 @@ defineProps({
     },
 });
 
-function handleImageError() {
-    document.getElementById('screenshot-container')?.classList.add('!hidden');
-    document.getElementById('docs-card')?.classList.add('!row-span-1');
-    document.getElementById('docs-card-content')?.classList.add('!flex-row');
-    document.getElementById('background')?.classList.add('!hidden');
-}
+// Interactive Simulator State
+const simPrompt = ref('Cyberpunk samurai overlooking a neon-lit rain city with holographic dragons [succeed]');
+const simSize = ref('1024x1024');
+const simQuality = ref('medium');
+const simImagesCount = ref(0);
+
+const pricingData = ref({
+    rates: {
+        input_text: '5.00',
+        input_image: '10.00',
+        output: '40.00',
+        reasoning: '12.50',
+    },
+    token_specs: {
+        output: [
+            { quality: 'low', size: '1024x1024', tokens: 280 },
+            { quality: 'low', size: '1536x1024', tokens: 420 },
+            { quality: 'low', size: '1024x1536', tokens: 420 },
+            { quality: 'medium', size: '1024x1024', tokens: 1100 },
+            { quality: 'medium', size: '1536x1024', tokens: 1650 },
+            { quality: 'medium', size: '1024x1536', tokens: 1650 },
+            { quality: 'high', size: '1024x1024', tokens: 4300 },
+            { quality: 'high', size: '1536x1024', tokens: 6450 },
+            { quality: 'high', size: '1024x1536', tokens: 6450 },
+        ],
+        reasoning: [
+            { quality: 'low', min: 0, max: 500 },
+            { quality: 'medium', min: 200, max: 2000 },
+            { quality: 'high', min: 1000, max: 8000 },
+        ],
+    },
+});
+
+onMounted(async () => {
+    try {
+        const res = await axios.get('https://pixelforge.promptedit.dev/v1/pricing');
+        if (res.data && res.data.rates) {
+            pricingData.value = res.data;
+        }
+    } catch {
+        // Fallback to initial defaults
+    }
+});
+
+const simEstimate = computed(() => {
+    const textTokens = Math.ceil((simPrompt.value || '').length / 4);
+    const imageTokens = simImagesCount.value * 765;
+
+    let outputTokens = 1100;
+    const matchedOutput = pricingData.value.token_specs?.output?.find(
+        (s) => s.quality === simQuality.value && s.size === simSize.value
+    );
+    if (matchedOutput) {
+        outputTokens = matchedOutput.tokens;
+    }
+
+    let reasoningMin = 200;
+    let reasoningMax = 2000;
+    const matchedReasoning = pricingData.value.token_specs?.reasoning?.find(
+        (s) => s.quality === simQuality.value
+    );
+    if (matchedReasoning) {
+        reasoningMin = matchedReasoning.min;
+        reasoningMax = matchedReasoning.max;
+    }
+
+    const rates = pricingData.value.rates;
+    const textRateNano = parseFloat(rates.input_text) * 1000;
+    const imageRateNano = parseFloat(rates.input_image) * 1000;
+    const outputRateNano = parseFloat(rates.output) * 1000;
+    const reasoningRateNano = parseFloat(rates.reasoning) * 1000;
+
+    const baseMinProviderNano =
+        textTokens * textRateNano +
+        imageTokens * imageRateNano +
+        outputTokens * outputRateNano +
+        reasoningMin * reasoningRateNano;
+
+    const baseMaxProviderNano =
+        textTokens * textRateNano +
+        imageTokens * imageRateNano +
+        outputTokens * outputRateNano +
+        reasoningMax * reasoningRateNano;
+
+    const minUserNano = Math.round(baseMinProviderNano * 1.25);
+    const maxUserNano = Math.round(baseMaxProviderNano * 1.25);
+    const headlineUserNano = Math.round((minUserNano + maxUserNano) / 2);
+
+    return {
+        textTokens,
+        imageTokens,
+        outputTokens,
+        reasoningMin,
+        reasoningMax,
+        minProviderUSD: (baseMinProviderNano / 1000000000).toFixed(9),
+        maxProviderUSD: (baseMaxProviderNano / 1000000000).toFixed(9),
+        minUserUSD: (minUserNano / 1000000000).toFixed(9),
+        maxUserUSD: (maxUserNano / 1000000000).toFixed(9),
+        headlineUserUSD: (headlineUserNano / 1000000000).toFixed(9),
+        headlineNano: headlineUserNano,
+    };
+});
+
+const sampleGenerations = [
+    {
+        title: 'Cyberpunk Ronin in Rain',
+        prompt: 'Futuristic samurai with neon katana in heavy Tokyo downpour [succeed]',
+        size: '1024x1024',
+        quality: 'Medium',
+        estimated: '$0.062125000',
+        actual: '$0.061842500',
+        status: 'succeeded',
+        gradient: 'from-purple-600 via-indigo-600 to-blue-500',
+    },
+    {
+        title: 'Deep Space Nebula Forge',
+        prompt: 'Cosmic star forge birthing celestial planets, hyper-detailed [slow]',
+        size: '1536x1024',
+        quality: 'High',
+        estimated: '$0.312500000',
+        actual: '$0.309875000',
+        status: 'succeeded',
+        gradient: 'from-amber-500 via-rose-600 to-purple-800',
+    },
+    {
+        title: 'Synthwave Retro Arcade',
+        prompt: '1980s neon arcade with glowing pixel cabinets and synth music vibe [duplicate]',
+        size: '1024x1536',
+        quality: 'Low',
+        estimated: '$0.021000000',
+        actual: '$0.020750000',
+        status: 'succeeded',
+        gradient: 'from-cyan-500 via-emerald-500 to-teal-700',
+    },
+    {
+        title: 'Restricted Guardrail Test',
+        prompt: 'Testing prompt policy boundary [blocked]',
+        size: '1024x1024',
+        quality: 'Low',
+        estimated: '$0.015803125',
+        actual: '$0.000000000',
+        status: 'failed',
+        error: 'Content policy violation',
+        gradient: 'from-red-600 via-rose-800 to-zinc-900',
+    },
+];
+
+const testKeywords = [
+    { tag: '[succeed]', desc: 'Fast normal completion with actual usage stats' },
+    { tag: '[slow]', desc: 'Simulates 60-90s generation time to test async polling' },
+    { tag: '[fail]', desc: 'Simulates generation failure with guaranteed $0 charge' },
+    { tag: '[duplicate]', desc: 'Dispatches duplicate webhooks to validate idempotency' },
+    { tag: '[blocked]', desc: 'Triggers instant 400 content policy error' },
+    { tag: '[overloaded]', desc: 'Simulates 503 provider backpressure and automatic retries' },
+];
 </script>
 
 <template>
-    <Head title="Welcome" />
-    <div class="bg-gray-50 text-black/50 dark:bg-black dark:text-white/50">
-        <img
-            id="background"
-            class="absolute -left-20 top-0 max-w-[877px]"
-            src="https://laravel.com/assets/img/welcome/background.svg"
-        />
-        <div
-            class="relative flex min-h-screen flex-col items-center justify-center selection:bg-[#FF2D20] selection:text-white"
-        >
-            <div class="relative w-full max-w-2xl px-6 lg:max-w-7xl">
-                <header
-                    class="grid grid-cols-2 items-center gap-2 py-10 lg:grid-cols-3"
-                >
-                    <div class="flex lg:col-start-2 lg:justify-center">
-                        <svg
-                            class="h-12 w-auto text-white lg:h-16 lg:text-[#FF2D20]"
-                            viewBox="0 0 62 65"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                        >
-                            <path
-                                d="M61.8548 14.6253C61.8778 14.7102 61.8895 14.7978 61.8897 14.8858V28.5615C61.8898 28.737 61.8434 28.9095 61.7554 29.0614C61.6675 29.2132 61.5409 29.3392 61.3887 29.4265L49.9104 36.0351V49.1337C49.9104 49.4902 49.7209 49.8192 49.4118 49.9987L25.4519 63.7916C25.3971 63.8227 25.3372 63.8427 25.2774 63.8639C25.255 63.8714 25.2338 63.8851 25.2101 63.8913C25.0426 63.9354 24.8666 63.9354 24.6991 63.8913C24.6716 63.8838 24.6467 63.8689 24.6205 63.8589C24.5657 63.8389 24.5084 63.8215 24.456 63.7916L0.501061 49.9987C0.348882 49.9113 0.222437 49.7853 0.134469 49.6334C0.0465019 49.4816 0.000120578 49.3092 0 49.1337L0 8.10652C0 8.01678 0.0124642 7.92953 0.0348998 7.84477C0.0423783 7.8161 0.0598282 7.78993 0.0697995 7.76126C0.0884958 7.70891 0.105946 7.65531 0.133367 7.6067C0.152063 7.5743 0.179485 7.54812 0.20192 7.51821C0.230588 7.47832 0.256763 7.43719 0.290416 7.40229C0.319084 7.37362 0.356476 7.35243 0.388883 7.32751C0.425029 7.29759 0.457436 7.26518 0.498568 7.2415L12.4779 0.345059C12.6296 0.257786 12.8015 0.211853 12.9765 0.211853C13.1515 0.211853 13.3234 0.257786 13.475 0.345059L25.4531 7.2415H25.4556C25.4955 7.26643 25.5292 7.29759 25.5653 7.32626C25.5977 7.35119 25.6339 7.37362 25.6625 7.40104C25.6974 7.43719 25.7224 7.47832 25.7523 7.51821C25.7735 7.54812 25.8021 7.5743 25.8196 7.6067C25.8483 7.65656 25.8645 7.70891 25.8844 7.76126C25.8944 7.78993 25.9118 7.8161 25.9193 7.84602C25.9423 7.93096 25.954 8.01853 25.9542 8.10652V33.7317L35.9355 27.9844V14.8846C35.9355 14.7973 35.948 14.7088 35.9704 14.6253C35.9792 14.5954 35.9954 14.5692 36.0053 14.5405C36.0253 14.4882 36.0427 14.4346 36.0702 14.386C36.0888 14.3536 36.1163 14.3274 36.1375 14.2975C36.1674 14.2576 36.1923 14.2165 36.2272 14.1816C36.2559 14.1529 36.292 14.1317 36.3244 14.1068C36.3618 14.0769 36.3942 14.0445 36.4341 14.0208L48.4147 7.12434C48.5663 7.03694 48.7383 6.99094 48.9133 6.99094C49.0883 6.99094 49.2602 7.03694 49.4118 7.12434L61.3899 14.0208C61.4323 14.0457 61.4647 14.0769 61.5021 14.1055C61.5333 14.1305 61.5694 14.1529 61.5981 14.1803C61.633 14.2165 61.6579 14.2576 61.6878 14.2975C61.7103 14.3274 61.7377 14.3536 61.7551 14.386C61.7838 14.4346 61.8 14.4882 61.8199 14.5405C61.8312 14.5692 61.8474 14.5954 61.8548 14.6253ZM59.893 27.9844V16.6121L55.7013 19.0252L49.9104 22.3593V33.7317L59.8942 27.9844H59.893ZM47.9149 48.5566V37.1768L42.2187 40.4299L25.953 49.7133V61.2003L47.9149 48.5566ZM1.99677 9.83281V48.5566L23.9562 61.199V49.7145L12.4841 43.2219L12.4804 43.2194L12.4754 43.2169C12.4368 43.1945 12.4044 43.1621 12.3682 43.1347C12.3371 43.1097 12.3009 43.0898 12.2735 43.0624L12.271 43.0586C12.2386 43.0275 12.2162 42.9888 12.1887 42.9539C12.1638 42.9203 12.1339 42.8916 12.114 42.8567L12.1127 42.853C12.0903 42.8156 12.0766 42.7707 12.0604 42.7283C12.0442 42.6909 12.023 42.656 12.013 42.6161C12.0005 42.5688 11.998 42.5177 11.9931 42.4691C11.9881 42.4317 11.9781 42.3943 11.9781 42.3569V15.5801L6.18848 12.2446L1.99677 9.83281ZM12.9777 2.36177L2.99764 8.10652L12.9752 13.8513L22.9541 8.10527L12.9752 2.36177H12.9777ZM18.1678 38.2138L23.9574 34.8809V9.83281L19.7657 12.2459L13.9749 15.5801V40.6281L18.1678 38.2138ZM48.9133 9.14105L38.9344 14.8858L48.9133 20.6305L58.8909 14.8846L48.9133 9.14105ZM47.9149 22.3593L42.124 19.0252L37.9323 16.6121V27.9844L43.7219 31.3174L47.9149 33.7317V22.3593ZM24.9533 47.987L39.59 39.631L46.9065 35.4555L36.9352 29.7145L25.4544 36.3242L14.9907 42.3482L24.9533 47.987Z"
-                                fill="currentColor"
-                            />
+    <Head title="Pixel Forge - Exact-Cost AI Image Generation" />
+
+    <div class="min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white font-sans antialiased overflow-x-hidden">
+        <!-- Ambient Glow Elements -->
+        <div class="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-gradient-to-b from-indigo-600/15 via-purple-600/10 to-transparent blur-3xl pointer-events-none -z-10"></div>
+        <div class="fixed -top-40 -right-40 w-96 h-96 bg-purple-600/20 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+        <div class="fixed top-1/2 -left-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+
+        <!-- Navigation Bar -->
+        <header class="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/25 ring-1 ring-white/20">
+                        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                     </div>
-                    <nav v-if="canLogin" class="-mx-3 flex flex-1 justify-end">
+                    <div>
+                        <span class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                            Pixel<span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">Forge</span>
+                            <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v1.0</span>
+                        </span>
+                    </div>
+                </div>
+
+                <nav class="flex items-center space-x-3 sm:space-x-4">
+                    <a href="#simulator" class="hidden sm:inline-flex text-sm text-slate-300 hover:text-white transition px-3 py-1.5">
+                        Live Estimator
+                    </a>
+                    <a href="#features" class="hidden sm:inline-flex text-sm text-slate-300 hover:text-white transition px-3 py-1.5">
+                        Architecture
+                    </a>
+                    <a href="#keywords" class="hidden sm:inline-flex text-sm text-slate-300 hover:text-white transition px-3 py-1.5">
+                        Test Lab
+                    </a>
+
+                    <div v-if="canLogin" class="flex items-center space-x-2 pl-2 sm:pl-4 border-l border-slate-800">
                         <Link
                             v-if="$page.props.auth.user"
                             :href="route('dashboard')"
-                            class="rounded-md px-3 py-2 text-black ring-1 ring-transparent transition hover:text-black/70 focus:outline-none focus-visible:ring-[#FF2D20] dark:text-white dark:hover:text-white/80 dark:focus-visible:ring-white"
+                            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition"
                         >
-                            Dashboard
+                            <span>Dashboard</span>
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                            </svg>
                         </Link>
-
                         <template v-else>
                             <Link
                                 :href="route('login')"
-                                class="rounded-md px-3 py-2 text-black ring-1 ring-transparent transition hover:text-black/70 focus:outline-none focus-visible:ring-[#FF2D20] dark:text-white dark:hover:text-white/80 dark:focus-visible:ring-white"
+                                class="px-3.5 py-2 text-sm font-medium text-slate-300 hover:text-white transition"
                             >
                                 Log in
                             </Link>
-
                             <Link
                                 v-if="canRegister"
                                 :href="route('register')"
-                                class="rounded-md px-3 py-2 text-black ring-1 ring-transparent transition hover:text-black/70 focus:outline-none focus-visible:ring-[#FF2D20] dark:text-white dark:hover:text-white/80 dark:focus-visible:ring-white"
+                                class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:from-indigo-400 hover:to-purple-500 shadow-md shadow-indigo-500/25 transition ring-1 ring-white/10"
                             >
-                                Register
+                                <span>Get $10 Credit</span>
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                </svg>
                             </Link>
                         </template>
-                    </nav>
-                </header>
+                    </div>
+                </nav>
+            </div>
+        </header>
 
-                <main class="mt-6">
-                    <div class="grid gap-6 lg:grid-cols-2 lg:gap-8">
-                        <a
-                            href="https://laravel.com/docs"
-                            id="docs-card"
-                            class="flex flex-col items-start gap-6 overflow-hidden rounded-lg bg-white p-6 shadow-[0px_14px_34px_0px_rgba(0,0,0,0.08)] ring-1 ring-white/[0.05] transition duration-300 hover:text-black/70 hover:ring-black/20 focus:outline-none focus-visible:ring-[#FF2D20] md:row-span-3 lg:p-10 lg:pb-10 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:text-white/70 dark:hover:ring-zinc-700 dark:focus-visible:ring-[#FF2D20]"
-                        >
-                            <div
-                                id="screenshot-container"
-                                class="relative flex w-full flex-1 items-stretch"
-                            >
-                                <img
-                                    src="https://laravel.com/assets/img/welcome/docs-light.svg"
-                                    alt="Laravel documentation screenshot"
-                                    class="aspect-video h-full w-full flex-1 rounded-[10px] object-cover object-top drop-shadow-[0px_4px_34px_rgba(0,0,0,0.06)] dark:hidden"
-                                    @error="handleImageError"
-                                />
-                                <img
-                                    src="https://laravel.com/assets/img/welcome/docs-dark.svg"
-                                    alt="Laravel documentation screenshot"
-                                    class="hidden aspect-video h-full w-full flex-1 rounded-[10px] object-cover object-top drop-shadow-[0px_4px_34px_rgba(0,0,0,0.25)] dark:block"
-                                />
-                                <div
-                                    class="absolute -bottom-16 -left-16 h-40 w-[calc(100%+8rem)] bg-gradient-to-b from-transparent via-white to-white dark:via-zinc-900 dark:to-zinc-900"
-                                ></div>
+        <!-- Hero Section -->
+        <section class="relative pt-16 pb-20 sm:pt-24 sm:pb-28">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                <!-- Top Badge -->
+                <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-indigo-500/30 text-xs font-medium text-indigo-300 mb-8 shadow-inner shadow-indigo-500/10 backdrop-blur-sm">
+                    <span class="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span class="flex h-2 w-2 rounded-full bg-emerald-400 -ml-4"></span>
+                    <span>Nanodollar Precision & Zero-Fail Transparency</span>
+                </div>
+
+                <!-- Main Headline -->
+                <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white max-w-4xl mx-auto leading-tight">
+                    Next-Gen AI Imaging with
+                    <span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-400">
+                        Exact Money Math
+                    </span>
+                </h1>
+
+                <!-- Subheadline -->
+                <p class="mt-6 text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto font-normal leading-relaxed">
+                    Generate images via Pixelforge with live token cost estimation, atomic forward-only state progression, HMAC signature verification, and zero-float nanodollar billing accuracy.
+                </p>
+
+                <!-- Hero Actions -->
+                <div class="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <Link
+                        v-if="!$page.props.auth.user"
+                        :href="route('register')"
+                        class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-600 text-white font-semibold text-base shadow-xl shadow-indigo-500/25 hover:shadow-indigo-500/40 hover:scale-[1.02] active:scale-[0.98] transition duration-150 ring-1 ring-white/20"
+                    >
+                        <span>Start Generating with $10 Credit</span>
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                    </Link>
+                    <Link
+                        v-else
+                        :href="route('generate')"
+                        class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-indigo-600 text-white font-semibold text-base shadow-xl shadow-indigo-600/30 hover:bg-indigo-500 hover:scale-[1.02] transition"
+                    >
+                        <span>Create Image Now</span>
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                    </Link>
+
+                    <a
+                        href="#simulator"
+                        class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold text-base border border-slate-700/80 shadow-lg transition"
+                    >
+                        <span>Interactive Cost Simulator</span>
+                        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </a>
+                </div>
+
+                <!-- Trust / Spec Stats -->
+                <div class="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+                    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-sm">
+                        <div class="text-2xl font-bold text-white font-mono">1 USD</div>
+                        <div class="text-xs text-slate-400 mt-1">1,000,000,000 Nanodollars</div>
+                    </div>
+                    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-sm">
+                        <div class="text-2xl font-bold text-emerald-400 font-mono">+25%</div>
+                        <div class="text-xs text-slate-400 mt-1">Fixed Transparent Markup</div>
+                    </div>
+                    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-sm">
+                        <div class="text-2xl font-bold text-purple-400 font-mono">0.000000000</div>
+                        <div class="text-xs text-slate-400 mt-1">9-Decimal Precision Display</div>
+                    </div>
+                    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 backdrop-blur-sm">
+                        <div class="text-2xl font-bold text-indigo-400 font-mono">HMAC-SHA256</div>
+                        <div class="text-xs text-slate-400 mt-1">Idempotent Webhooks</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Interactive Cost Simulator Section -->
+        <section id="simulator" class="py-20 border-t border-slate-800/80 bg-slate-900/30 relative">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-14">
+                    <h2 class="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Live Math Engine</h2>
+                    <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white">Interactive Nanodollar Cost Estimator</p>
+                    <p class="mt-3 text-slate-400 text-sm sm:text-base">
+                        Test the real-time pricing breakdown. Text tokens, output resolution, reference images, and reasoning ranges are computed live without float rounding errors.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start max-w-6xl mx-auto">
+                    <!-- Controls -->
+                    <div class="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+                        <div class="space-y-6">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-200 mb-2">Prompt Input</label>
+                                <textarea
+                                    v-model="simPrompt"
+                                    rows="3"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm transition"
+                                    placeholder="Enter your image prompt..."
+                                ></textarea>
+                                <div class="mt-1 flex justify-between text-xs text-slate-400 font-mono">
+                                    <span>Length: {{ simPrompt.length }} chars</span>
+                                    <span>Text Tokens: ~{{ simEstimate.textTokens }}</span>
+                                </div>
                             </div>
 
-                            <div
-                                class="relative flex items-center gap-6 lg:items-end"
-                            >
-                                <div
-                                    id="docs-card-content"
-                                    class="flex items-start gap-6 lg:flex-col"
-                                >
-                                    <div
-                                        class="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#FF2D20]/10 sm:size-16"
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-200 mb-2">Output Resolution</label>
+                                    <select
+                                        v-model="simSize"
+                                        class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
                                     >
-                                        <svg
-                                            class="size-5 sm:size-6"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path
-                                                fill="#FF2D20"
-                                                d="M23 4a1 1 0 0 0-1.447-.894L12.224 7.77a.5.5 0 0 1-.448 0L2.447 3.106A1 1 0 0 0 1 4v13.382a1.99 1.99 0 0 0 1.105 1.79l9.448 4.728c.14.065.293.1.447.1.154-.005.306-.04.447-.105l9.453-4.724a1.99 1.99 0 0 0 1.1-1.789V4ZM3 6.023a.25.25 0 0 1 .362-.223l7.5 3.75a.251.251 0 0 1 .138.223v11.2a.25.25 0 0 1-.362.224l-7.5-3.75a.25.25 0 0 1-.138-.22V6.023Zm18 11.2a.25.25 0 0 1-.138.224l-7.5 3.75a.249.249 0 0 1-.329-.099.249.249 0 0 1-.033-.12V9.772a.251.251 0 0 1 .138-.224l7.5-3.75a.25.25 0 0 1 .362.224v11.2Z"
-                                            />
-                                            <path
-                                                fill="#FF2D20"
-                                                d="m3.55 1.893 8 4.048a1.008 1.008 0 0 0 .9 0l8-4.048a1 1 0 0 0-.9-1.785l-7.322 3.706a.506.506 0 0 1-.452 0L4.454.108a1 1 0 0 0-.9 1.785H3.55Z"
-                                            />
-                                        </svg>
-                                    </div>
-
-                                    <div class="pt-3 sm:pt-5 lg:pt-0">
-                                        <h2
-                                            class="text-xl font-semibold text-black dark:text-white"
-                                        >
-                                            Documentation
-                                        </h2>
-
-                                        <p class="mt-4 text-sm/relaxed">
-                                            Laravel has wonderful documentation
-                                            covering every aspect of the
-                                            framework. Whether you are a
-                                            newcomer or have prior experience
-                                            with Laravel, we recommend reading
-                                            our documentation from beginning to
-                                            end.
-                                        </p>
-                                    </div>
+                                        <option value="1024x1024">Square (1024 x 1024)</option>
+                                        <option value="1536x1024">Landscape (1536 x 1024)</option>
+                                        <option value="1024x1536">Portrait (1024 x 1536)</option>
+                                    </select>
                                 </div>
 
-                                <svg
-                                    class="size-6 shrink-0 stroke-[#FF2D20]"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke-width="1.5"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75"
-                                    />
-                                </svg>
-                            </div>
-                        </a>
-
-                        <a
-                            href="https://laracasts.com"
-                            class="flex items-start gap-4 rounded-lg bg-white p-6 shadow-[0px_14px_34px_0px_rgba(0,0,0,0.08)] ring-1 ring-white/[0.05] transition duration-300 hover:text-black/70 hover:ring-black/20 focus:outline-none focus-visible:ring-[#FF2D20] lg:pb-10 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:text-white/70 dark:hover:ring-zinc-700 dark:focus-visible:ring-[#FF2D20]"
-                        >
-                            <div
-                                class="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#FF2D20]/10 sm:size-16"
-                            >
-                                <svg
-                                    class="size-5 sm:size-6"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <g fill="#FF2D20">
-                                        <path
-                                            d="M24 8.25a.5.5 0 0 0-.5-.5H.5a.5.5 0 0 0-.5.5v12a2.5 2.5 0 0 0 2.5 2.5h19a2.5 2.5 0 0 0 2.5-2.5v-12Zm-7.765 5.868a1.221 1.221 0 0 1 0 2.264l-6.626 2.776A1.153 1.153 0 0 1 8 18.123v-5.746a1.151 1.151 0 0 1 1.609-1.035l6.626 2.776ZM19.564 1.677a.25.25 0 0 0-.177-.427H15.6a.106.106 0 0 0-.072.03l-4.54 4.543a.25.25 0 0 0 .177.427h3.783c.027 0 .054-.01.073-.03l4.543-4.543ZM22.071 1.318a.047.047 0 0 0-.045.013l-4.492 4.492a.249.249 0 0 0 .038.385.25.25 0 0 0 .14.042h5.784a.5.5 0 0 0 .5-.5v-2a2.5 2.5 0 0 0-1.925-2.432ZM13.014 1.677a.25.25 0 0 0-.178-.427H9.101a.106.106 0 0 0-.073.03l-4.54 4.543a.25.25 0 0 0 .177.427H8.4a.106.106 0 0 0 .073-.03l4.54-4.543ZM6.513 1.677a.25.25 0 0 0-.177-.427H2.5A2.5 2.5 0 0 0 0 3.75v2a.5.5 0 0 0 .5.5h1.4a.106.106 0 0 0 .073-.03l4.54-4.543Z"
-                                        />
-                                    </g>
-                                </svg>
-                            </div>
-
-                            <div class="pt-3 sm:pt-5">
-                                <h2
-                                    class="text-xl font-semibold text-black dark:text-white"
-                                >
-                                    Laracasts
-                                </h2>
-
-                                <p class="mt-4 text-sm/relaxed">
-                                    Laracasts offers thousands of video
-                                    tutorials on Laravel, PHP, and JavaScript
-                                    development. Check them out, see for
-                                    yourself, and massively level up your
-                                    development skills in the process.
-                                </p>
-                            </div>
-
-                            <svg
-                                class="size-6 shrink-0 self-center stroke-[#FF2D20]"
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke-width="1.5"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75"
-                                />
-                            </svg>
-                        </a>
-
-                        <a
-                            href="https://laravel-news.com"
-                            class="flex items-start gap-4 rounded-lg bg-white p-6 shadow-[0px_14px_34px_0px_rgba(0,0,0,0.08)] ring-1 ring-white/[0.05] transition duration-300 hover:text-black/70 hover:ring-black/20 focus:outline-none focus-visible:ring-[#FF2D20] lg:pb-10 dark:bg-zinc-900 dark:ring-zinc-800 dark:hover:text-white/70 dark:hover:ring-zinc-700 dark:focus-visible:ring-[#FF2D20]"
-                        >
-                            <div
-                                class="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#FF2D20]/10 sm:size-16"
-                            >
-                                <svg
-                                    class="size-5 sm:size-6"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <g fill="#FF2D20">
-                                        <path
-                                            d="M8.75 4.5H5.5c-.69 0-1.25.56-1.25 1.25v4.75c0 .69.56 1.25 1.25 1.25h3.25c.69 0 1.25-.56 1.25-1.25V5.75c0-.69-.56-1.25-1.25-1.25Z"
-                                        />
-                                        <path
-                                            d="M24 10a3 3 0 0 0-3-3h-2V2.5a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2V20a3.5 3.5 0 0 0 3.5 3.5h17A3.5 3.5 0 0 0 24 20V10ZM3.5 21.5A1.5 1.5 0 0 1 2 20V3a.5.5 0 0 1 .5-.5h14a.5.5 0 0 1 .5.5v17c0 .295.037.588.11.874a.5.5 0 0 1-.484.625L3.5 21.5ZM22 20a1.5 1.5 0 1 1-3 0V9.5a.5.5 0 0 1 .5-.5H21a1 1 0 0 1 1 1v10Z"
-                                        />
-                                        <path
-                                            d="M12.751 6.047h2a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-.75.75h-2A.75.75 0 0 1 12 7.3v-.5a.75.75 0 0 1 .751-.753ZM12.751 10.047h2a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-.75.75h-2A.75.75 0 0 1 12 11.3v-.5a.75.75 0 0 1 .751-.753ZM4.751 14.047h10a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-.75.75h-10A.75.75 0 0 1 4 15.3v-.5a.75.75 0 0 1 .751-.753ZM4.75 18.047h7.5a.75.75 0 0 1 .75.75v.5a.75.75 0 0 1-.75.75h-7.5A.75.75 0 0 1 4 19.3v-.5a.75.75 0 0 1 .75-.753Z"
-                                        />
-                                    </g>
-                                </svg>
-                            </div>
-
-                            <div class="pt-3 sm:pt-5">
-                                <h2
-                                    class="text-xl font-semibold text-black dark:text-white"
-                                >
-                                    Laravel News
-                                </h2>
-
-                                <p class="mt-4 text-sm/relaxed">
-                                    Laravel News is a community driven portal
-                                    and newsletter aggregating all of the latest
-                                    and most important news in the Laravel
-                                    ecosystem, including new package releases
-                                    and tutorials.
-                                </p>
-                            </div>
-
-                            <svg
-                                class="size-6 shrink-0 self-center stroke-[#FF2D20]"
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke-width="1.5"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75"
-                                />
-                            </svg>
-                        </a>
-
-                        <div
-                            class="flex items-start gap-4 rounded-lg bg-white p-6 shadow-[0px_14px_34px_0px_rgba(0,0,0,0.08)] ring-1 ring-white/[0.05] lg:pb-10 dark:bg-zinc-900 dark:ring-zinc-800"
-                        >
-                            <div
-                                class="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#FF2D20]/10 sm:size-16"
-                            >
-                                <svg
-                                    class="size-5 sm:size-6"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <g fill="#FF2D20">
-                                        <path
-                                            d="M16.597 12.635a.247.247 0 0 0-.08-.237 2.234 2.234 0 0 1-.769-1.68c.001-.195.03-.39.084-.578a.25.25 0 0 0-.09-.267 8.8 8.8 0 0 0-4.826-1.66.25.25 0 0 0-.268.181 2.5 2.5 0 0 1-2.4 1.824.045.045 0 0 0-.045.037 12.255 12.255 0 0 0-.093 3.86.251.251 0 0 0 .208.214c2.22.366 4.367 1.08 6.362 2.118a.252.252 0 0 0 .32-.079 10.09 10.09 0 0 0 1.597-3.733ZM13.616 17.968a.25.25 0 0 0-.063-.407A19.697 19.697 0 0 0 8.91 15.98a.25.25 0 0 0-.287.325c.151.455.334.898.548 1.328.437.827.981 1.594 1.619 2.28a.249.249 0 0 0 .32.044 29.13 29.13 0 0 0 2.506-1.99ZM6.303 14.105a.25.25 0 0 0 .265-.274 13.048 13.048 0 0 1 .205-4.045.062.062 0 0 0-.022-.07 2.5 2.5 0 0 1-.777-.982.25.25 0 0 0-.271-.149 11 11 0 0 0-5.6 2.815.255.255 0 0 0-.075.163c-.008.135-.02.27-.02.406.002.8.084 1.598.246 2.381a.25.25 0 0 0 .303.193 19.924 19.924 0 0 1 5.746-.438ZM9.228 20.914a.25.25 0 0 0 .1-.393 11.53 11.53 0 0 1-1.5-2.22 12.238 12.238 0 0 1-.91-2.465.248.248 0 0 0-.22-.187 18.876 18.876 0 0 0-5.69.33.249.249 0 0 0-.179.336c.838 2.142 2.272 4 4.132 5.353a.254.254 0 0 0 .15.048c1.41-.01 2.807-.282 4.117-.802ZM18.93 12.957l-.005-.008a.25.25 0 0 0-.268-.082 2.21 2.21 0 0 1-.41.081.25.25 0 0 0-.217.2c-.582 2.66-2.127 5.35-5.75 7.843a.248.248 0 0 0-.09.299.25.25 0 0 0 .065.091 28.703 28.703 0 0 0 2.662 2.12.246.246 0 0 0 .209.037c2.579-.701 4.85-2.242 6.456-4.378a.25.25 0 0 0 .048-.189 13.51 13.51 0 0 0-2.7-6.014ZM5.702 7.058a.254.254 0 0 0 .2-.165A2.488 2.488 0 0 1 7.98 5.245a.093.093 0 0 0 .078-.062 19.734 19.734 0 0 1 3.055-4.74.25.25 0 0 0-.21-.41 12.009 12.009 0 0 0-10.4 8.558.25.25 0 0 0 .373.281 12.912 12.912 0 0 1 4.826-1.814ZM10.773 22.052a.25.25 0 0 0-.28-.046c-.758.356-1.55.635-2.365.833a.25.25 0 0 0-.022.48c1.252.43 2.568.65 3.893.65.1 0 .2 0 .3-.008a.25.25 0 0 0 .147-.444c-.526-.424-1.1-.917-1.673-1.465ZM18.744 8.436a.249.249 0 0 0 .15.228 2.246 2.246 0 0 1 1.352 2.054c0 .337-.08.67-.23.972a.25.25 0 0 0 .042.28l.007.009a15.016 15.016 0 0 1 2.52 4.6.25.25 0 0 0 .37.132.25.25 0 0 0 .096-.114c.623-1.464.944-3.039.945-4.63a12.005 12.005 0 0 0-5.78-10.258.25.25 0 0 0-.373.274c.547 2.109.85 4.274.901 6.453ZM9.61 5.38a.25.25 0 0 0 .08.31c.34.24.616.561.8.935a.25.25 0 0 0 .3.127.631.631 0 0 1 .206-.034c2.054.078 4.036.772 5.69 1.991a.251.251 0 0 0 .267.024c.046-.024.093-.047.141-.067a.25.25 0 0 0 .151-.23A29.98 29.98 0 0 0 15.957.764a.25.25 0 0 0-.16-.164 11.924 11.924 0 0 0-2.21-.518.252.252 0 0 0-.215.076A22.456 22.456 0 0 0 9.61 5.38Z"
-                                        />
-                                    </g>
-                                </svg>
-                            </div>
-
-                            <div class="pt-3 sm:pt-5">
-                                <h2
-                                    class="text-xl font-semibold text-black dark:text-white"
-                                >
-                                    Vibrant Ecosystem
-                                </h2>
-
-                                <p class="mt-4 text-sm/relaxed">
-                                    Laravel's robust library of first-party
-                                    tools and libraries, such as
-                                    <a
-                                        href="https://forge.laravel.com"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white dark:focus-visible:ring-[#FF2D20]"
-                                        >Forge</a
-                                    >,
-                                    <a
-                                        href="https://vapor.laravel.com"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Vapor</a
-                                    >,
-                                    <a
-                                        href="https://nova.laravel.com"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Nova</a
-                                    >,
-                                    <a
-                                        href="https://envoyer.io"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Envoyer</a
-                                    >, and
-                                    <a
-                                        href="https://herd.laravel.com"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Herd</a
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-200 mb-2">Quality Tier</label>
+                                    <select
+                                        v-model="simQuality"
+                                        class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
                                     >
-                                    help you take your projects to the next
-                                    level. Pair them with powerful open source
-                                    libraries like
-                                    <a
-                                        href="https://laravel.com/docs/billing"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Cashier</a
-                                    >,
-                                    <a
-                                        href="https://laravel.com/docs/dusk"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Dusk</a
-                                    >,
-                                    <a
-                                        href="https://laravel.com/docs/broadcasting"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Echo</a
-                                    >,
-                                    <a
-                                        href="https://laravel.com/docs/horizon"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Horizon</a
-                                    >,
-                                    <a
-                                        href="https://laravel.com/docs/sanctum"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Sanctum</a
-                                    >,
-                                    <a
-                                        href="https://laravel.com/docs/telescope"
-                                        class="rounded-sm underline hover:text-black focus:outline-none focus-visible:ring-1 focus-visible:ring-[#FF2D20] dark:hover:text-white"
-                                        >Telescope</a
-                                    >, and more.
-                                </p>
+                                        <option value="low">Low (Fast / Budget)</option>
+                                        <option value="medium">Medium (Balanced)</option>
+                                        <option value="high">High (Maximum Detail)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-sm font-medium text-slate-200">Reference Images (765 tokens each)</label>
+                                    <span class="text-xs text-indigo-400 font-mono">{{ simImagesCount }} / 4 images</span>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                        v-for="count in [0, 1, 2, 3, 4]"
+                                        :key="count"
+                                        type="button"
+                                        @click="simImagesCount = count"
+                                        :class="[
+                                            simImagesCount === count
+                                                ? 'bg-indigo-600 text-white border-indigo-500'
+                                                : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800',
+                                            'flex-1 py-2 text-xs font-semibold rounded-lg border transition'
+                                        ]"
+                                    >
+                                        {{ count }}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </main>
 
-                <footer
-                    class="py-16 text-center text-sm text-black dark:text-white/70"
-                >
-                    Laravel v{{ laravelVersion }} (PHP v{{ phpVersion }})
-                </footer>
+                    <!-- Breakdown Result Card -->
+                    <div class="lg:col-span-5 bg-gradient-to-br from-indigo-950/60 via-slate-900 to-purple-950/40 border border-indigo-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+                        <div class="absolute -top-12 -right-12 w-36 h-36 bg-indigo-500/20 rounded-full blur-2xl"></div>
+
+                        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-indigo-300">Live Breakdown</span>
+                            <span class="text-xs text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">Exact Math</span>
+                        </div>
+
+                        <!-- Main Headline Estimate -->
+                        <div class="mt-6 mb-6">
+                            <div class="text-xs text-slate-400">Headline User Estimate (with 25% markup)</div>
+                            <div class="text-3xl font-extrabold text-white font-mono mt-1 tracking-tight">
+                                ${{ simEstimate.headlineUserUSD }}
+                            </div>
+                            <div class="text-xs text-indigo-300 mt-1 font-mono">
+                                {{ simEstimate.headlineNano.toLocaleString() }} nanodollars
+                            </div>
+                        </div>
+
+                        <!-- Expected Range -->
+                        <div class="bg-slate-950/80 rounded-xl p-4 border border-slate-800/80 mb-6 space-y-2 text-xs font-mono">
+                            <div class="flex justify-between text-slate-300">
+                                <span>Estimated Range:</span>
+                                <span class="text-white">${{ simEstimate.minUserUSD }} – ${{ simEstimate.maxUserUSD }}</span>
+                            </div>
+                            <div class="flex justify-between text-slate-400">
+                                <span>Base Provider Cost:</span>
+                                <span>${{ simEstimate.minProviderUSD }} – ${{ simEstimate.maxProviderUSD }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Token Breakdown Table -->
+                        <div class="space-y-2 text-xs font-mono text-slate-300">
+                            <div class="flex justify-between py-1.5 border-b border-slate-800/60">
+                                <span class="text-slate-400">Text Tokens ($5/1M):</span>
+                                <span class="text-white">{{ simEstimate.textTokens }}</span>
+                            </div>
+                            <div class="flex justify-between py-1.5 border-b border-slate-800/60">
+                                <span class="text-slate-400">Output Tokens ($40/1M):</span>
+                                <span class="text-white">{{ simEstimate.outputTokens }}</span>
+                            </div>
+                            <div class="flex justify-between py-1.5 border-b border-slate-800/60">
+                                <span class="text-slate-400">Reasoning Range ($12.50/1M):</span>
+                                <span class="text-white">{{ simEstimate.reasoningMin }} – {{ simEstimate.reasoningMax }}</span>
+                            </div>
+                            <div class="flex justify-between py-1.5">
+                                <span class="text-slate-400">Reference Images ($10/1M):</span>
+                                <span class="text-white">{{ simEstimate.imageTokens }} ({{ simImagesCount }}x)</span>
+                            </div>
+                        </div>
+
+                        <div class="mt-6 pt-4 border-t border-slate-800/80">
+                            <Link
+                                v-if="!$page.props.auth.user"
+                                :href="route('register')"
+                                class="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition shadow-md shadow-indigo-600/30"
+                            >
+                                <span>Try on Live Account ($10 Credit)</span>
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                </svg>
+                            </Link>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
+        </section>
+
+        <!-- Architectural Highlights Section -->
+        <section id="features" class="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <h2 class="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Built for Correctness</h2>
+                <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white">Engineered for Robust Financial Integrity</p>
+                <p class="mt-3 text-slate-400 text-sm sm:text-base">
+                    Every design decision in Pixel Forge is built around money correctness, state resilience, and transparent reconciliation.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Card 1 -->
+                <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-indigo-500/40 transition duration-200">
+                    <div class="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-5 ring-1 ring-indigo-500/20">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Zero-Float Nanodollar Engine</h3>
+                    <p class="text-sm text-slate-400 leading-relaxed">
+                        Money is stored and manipulated strictly as integer nanodollars (<code class="text-indigo-300 font-mono">1 USD = 10^9</code>). BCMath ensures floating-point truncation never compromises invoicing.
+                    </p>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-purple-500/40 transition duration-200">
+                    <div class="w-12 h-12 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center mb-5 ring-1 ring-purple-500/20">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">HMAC-SHA256 Webhook Pipeline</h3>
+                    <p class="text-sm text-slate-400 leading-relaxed">
+                        Verifies raw webhook signatures with timing-safe comparisons and rejects timestamps older than 300 seconds. Event deduplication is enforced at database level.
+                    </p>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-emerald-500/40 transition duration-200">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-5 ring-1 ring-emerald-500/20">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Forward-Only State Machine</h3>
+                    <p class="text-sm text-slate-400 leading-relaxed">
+                        Generations progress strictly: <code class="text-emerald-300 font-mono">queued → processing → succeeded|failed</code>. Row-level locks prevent out-of-order race conditions from double-charging.
+                    </p>
+                </div>
+
+                <!-- Card 4 -->
+                <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-pink-500/40 transition duration-200">
+                    <div class="w-12 h-12 rounded-xl bg-pink-500/10 text-pink-400 flex items-center justify-center mb-5 ring-1 ring-pink-500/20">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Automated Usage Reconciliation</h3>
+                    <p class="text-sm text-slate-400 leading-relaxed">
+                        Admin reporting reconciles provider costs against Pixelforge's <code class="text-pink-300 font-mono">GET /v1/usage</code> API, ensuring local ledger matches remote telemetry exactly.
+                    </p>
+                </div>
+
+                <!-- Card 5 -->
+                <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-cyan-500/40 transition duration-200">
+                    <div class="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center mb-5 ring-1 ring-cyan-500/20">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Atomic Credit Protection</h3>
+                    <p class="text-sm text-slate-400 leading-relaxed">
+                        User balance is atomically validated before dispatching jobs. Failed generations incur zero charge, and balances are strictly locked against concurrent overdrafts.
+                    </p>
+                </div>
+
+                <!-- Card 6 -->
+                <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 hover:border-amber-500/40 transition duration-200">
+                    <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center mb-5 ring-1 ring-amber-500/20">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-bold text-white mb-2">Live UI Polling & Sync</h3>
+                    <p class="text-sm text-slate-400 leading-relaxed">
+                        Inertia.js partial reloads poll every 3 seconds for active jobs. Status updates, estimated vs actual costs, and temporary URL expiration handling are completely seamless.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sample Showcase Section -->
+        <section class="py-20 border-t border-slate-800/80 bg-slate-900/20">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center max-w-3xl mx-auto mb-14">
+                    <h2 class="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Generation Showcase</h2>
+                    <p class="mt-2 text-3xl sm:text-4xl font-extrabold text-white">Estimated vs. Actual Invoicing</p>
+                    <p class="mt-3 text-slate-400 text-sm sm:text-base">
+                        Observe how different parameters resolve into exact nanodollar charges on completion.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div
+                        v-for="(gen, idx) in sampleGenerations"
+                        :key="idx"
+                        class="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex flex-col justify-between"
+                    >
+                        <!-- Graphic Placeholder -->
+                        <div :class="['h-36 bg-gradient-to-tr p-4 flex flex-col justify-between relative', gen.gradient]">
+                            <div class="flex justify-between items-center">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-black/40 text-white backdrop-blur-md">
+                                    {{ gen.quality }} Quality
+                                </span>
+                                <span
+                                    :class="[
+                                        gen.status === 'succeeded' ? 'bg-emerald-500/80 text-white' : 'bg-red-500/80 text-white',
+                                        'px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-md'
+                                    ]"
+                                >
+                                    {{ gen.status }}
+                                </span>
+                            </div>
+                            <div class="text-white font-semibold text-sm drop-shadow-md">
+                                {{ gen.title }}
+                            </div>
+                        </div>
+
+                        <!-- Content Details -->
+                        <div class="p-5 space-y-3 flex-1 flex flex-col justify-between">
+                            <p class="text-xs text-slate-300 italic line-clamp-2">"{{ gen.prompt }}"</p>
+
+                            <div class="pt-3 border-t border-slate-800 text-xs font-mono space-y-1.5">
+                                <div class="flex justify-between text-slate-400">
+                                    <span>Resolution:</span>
+                                    <span class="text-slate-200">{{ gen.size }}</span>
+                                </div>
+                                <div class="flex justify-between text-slate-400">
+                                    <span>Estimated:</span>
+                                    <span class="text-slate-200">{{ gen.estimated }}</span>
+                                </div>
+                                <div class="flex justify-between font-bold">
+                                    <span class="text-indigo-400">Actual Charge:</span>
+                                    <span :class="gen.status === 'succeeded' ? 'text-emerald-400' : 'text-slate-400'">
+                                        {{ gen.actual }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Test Keywords Laboratory Section -->
+        <section id="keywords" class="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-12 shadow-2xl">
+                <div class="max-w-3xl mb-10">
+                    <span class="text-xs font-semibold text-indigo-400 uppercase tracking-widest">Integration Testing Lab</span>
+                    <h2 class="text-3xl font-extrabold text-white mt-2">Pixelforge Test Keywords Supported</h2>
+                    <p class="text-slate-400 text-sm sm:text-base mt-2">
+                        Append any of these keywords to your prompts to test edge cases, concurrency backoff, duplicate events, and content guardrails.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div
+                        v-for="(kw, idx) in testKeywords"
+                        :key="idx"
+                        class="bg-slate-950/80 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between"
+                    >
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="px-2.5 py-1 rounded-md bg-indigo-500/20 text-indigo-300 font-mono text-xs font-bold border border-indigo-500/30">
+                                {{ kw.tag }}
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-400 leading-relaxed">{{ kw.desc }}</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA Section -->
+        <section class="py-20 border-t border-slate-800/80 text-center relative overflow-hidden">
+            <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+                <h2 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+                    Ready for Exact-Cost Generative Imaging?
+                </h2>
+                <p class="mt-4 text-base sm:text-lg text-slate-400 max-w-xl mx-auto">
+                    Sign up in seconds. You'll receive $10.00 in initial test credits and instant access to the generation suite.
+                </p>
+
+                <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <Link
+                        v-if="!$page.props.auth.user"
+                        :href="route('register')"
+                        class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold text-base shadow-xl shadow-indigo-500/25 hover:from-indigo-400 hover:to-purple-500 transition"
+                    >
+                        Claim $10 Free Credits
+                    </Link>
+                    <Link
+                        v-else
+                        :href="route('generate')"
+                        class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-indigo-600 text-white font-semibold text-base shadow-xl shadow-indigo-600/30 hover:bg-indigo-500 transition"
+                    >
+                        Go to Image Generator
+                    </Link>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="border-t border-slate-900 bg-slate-950 py-10">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+                <div class="flex items-center space-x-2">
+                    <span class="font-bold text-slate-300">Pixel Forge</span>
+                    <span>&bull;</span>
+                    <span>Powered by Laravel {{ laravelVersion }} & PHP {{ phpVersion }}</span>
+                </div>
+                <div class="flex items-center space-x-6">
+                    <a href="https://pixelforge.promptedit.dev/docs" target="_blank" class="hover:text-slate-300 transition">
+                        Pixelforge API Docs
+                    </a>
+                    <a href="https://github.com" target="_blank" class="hover:text-slate-300 transition">
+                        GitHub Repository
+                    </a>
+                </div>
+            </div>
+        </footer>
     </div>
 </template>
