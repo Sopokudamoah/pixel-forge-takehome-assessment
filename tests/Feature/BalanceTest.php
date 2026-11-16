@@ -75,3 +75,47 @@ test('debit fails safely when balance is lower than amount', function () {
     $balance = UserBalance::where('user_id', $user->id)->first();
     expect($balance->balance_nano)->toBe(5_000_000_000); // untouched
 });
+
+test('successful generation debits user balance correctly', function () {
+    $pricing = app(PricingService::class);
+    $balanceService = app(BalanceService::class);
+    $machine = new \App\Actions\GenerationStateMachine($pricing, $balanceService);
+
+    $user = User::factory()->create();
+    $balanceService->getOrCreate($user);
+
+    $genId = (string) \Illuminate\Support\Str::uuid();
+    $gen = Generation::create([
+        'id' => $genId,
+        'user_id' => $user->id,
+        'prompt' => 'A test prompt',
+        'size' => '1024x1024',
+        'quality' => 'low',
+        'status' => 'queued',
+        'rates' => [
+            'input_text_tokens' => '5.00',
+            'output_tokens' => '40.00',
+            'reasoning_tokens' => '12.50',
+        ],
+        'idempotency_key' => $genId,
+    ]);
+
+    $payload = [
+        'usage' => [
+            'input_text_tokens' => 6,
+            'output_tokens' => 280,
+            'reasoning_tokens' => 113,
+        ],
+        'image_url' => 'https://pixelforge.promptedit.dev/images/sample.png',
+    ];
+
+    $machine->transition($gen, 'succeeded', $payload);
+
+    $balance = UserBalance::where('user_id', $user->id)->first();
+    // Initial 10_000_000_000 - 15_803_125 = 9_984_196_875
+    expect($balance->balance_nano)->toBe(9_984_196_875);
+
+    // Duplicate transition should not double debit
+    $machine->transition($gen, 'succeeded', $payload);
+    expect(UserBalance::where('user_id', $user->id)->first()->balance_nano)->toBe(9_984_196_875);
+});

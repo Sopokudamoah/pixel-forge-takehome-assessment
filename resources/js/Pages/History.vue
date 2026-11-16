@@ -22,7 +22,7 @@ const startPolling = () => {
     if (pollTimer) return;
     pollTimer = setInterval(() => {
         if (hasActiveGenerations.value) {
-            router.reload({ only: ['generations'], preserveScroll: true });
+            router.reload({ only: ['generations', 'auth'], preserveScroll: true });
         }
     }, 3000);
 };

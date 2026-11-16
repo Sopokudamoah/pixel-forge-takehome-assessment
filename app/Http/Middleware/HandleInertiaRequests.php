@@ -30,7 +30,13 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
-        $balanceNano = $user ? ($user->balance?->balance_nano ?? 10_000_000_000) : 0;
+        $balanceNano = 0;
+        if ($user) {
+            $balanceNano = \App\Models\UserBalance::where('user_id', $user->id)->value('balance_nano');
+            if ($balanceNano === null) {
+                $balanceNano = app(\App\Services\BalanceService::class)->getOrCreate($user)->balance_nano;
+            }
+        }
 
         return [
             ...parent::share($request),
@@ -39,8 +45,8 @@ class HandleInertiaRequests extends Middleware
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
-                    'balance_nano' => $balanceNano,
-                    'balance_display' => (new \App\ValueObjects\Money($balanceNano))->formatShort(),
+                    'balance_nano' => (int) $balanceNano,
+                    'balance_display' => (new \App\ValueObjects\Money((int) $balanceNano))->formatShort(),
                 ] : null,
             ],
             'flash' => [

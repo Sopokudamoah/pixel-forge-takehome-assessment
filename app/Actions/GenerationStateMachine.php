@@ -93,7 +93,10 @@ class GenerationStateMachine
         $generation->provider_cost_nano = $providerCost->nanoDollars;
         $generation->user_charge_nano = $userCharge->nanoDollars;
 
-        $this->balanceService->debit($generation->user, $userCharge->nanoDollars, $generation);
+        $user = $generation->user ?? \App\Models\User::find($generation->user_id);
+        if ($user) {
+            $this->balanceService->debit($user, $userCharge->nanoDollars, $generation);
+        }
     }
 
     protected function handleFailure(Generation $generation, array $payload): void

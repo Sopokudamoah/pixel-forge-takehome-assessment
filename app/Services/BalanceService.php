@@ -29,6 +29,10 @@ class BalanceService
     public function debit(User $user, int $costNano, $generation): bool
     {
         return DB::transaction(function () use ($user, $costNano, $generation) {
+            if ($generation && UserLedger::where('generation_id', $generation->id)->exists()) {
+                return true;
+            }
+
             $balance = UserBalance::where('user_id', $user->id)->lockForUpdate()->first();
             if (!$balance) {
                 $this->getOrCreate($user);
@@ -42,20 +46,22 @@ class BalanceService
             $balance->balance_nano -= $costNano;
             $balance->save();
 
-            UserLedger::firstOrCreate(
-                ['generation_id' => $generation->id],
-                [
-                    'user_id' => $user->id,
-                    'amount_nano' => $costNano,
-                    'type' => 'debit',
-                ]
-            );
+            if ($generation) {
+                UserLedger::firstOrCreate(
+                    ['generation_id' => $generation->id],
+                    [
+                        'user_id' => $user->id,
+                        'amount_nano' => $costNano,
+                        'type' => 'debit',
+                    ]
+                );
+            }
 
             CreditTransaction::create([
                 'user_id' => $user->id,
                 'amount_nano' => $costNano,
                 'type' => 'charge',
-                'reference' => $generation->id,
+                'reference' => $generation?->id,
             ]);
 
             return true;
